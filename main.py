@@ -4,14 +4,14 @@ import io
 import csv
 import zipfile
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Body
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi.templating import Jinja2Templates
-
-
+from pydantic import BaseModel
+from datetime import datetime
 
 
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://ann41422_db_user:12345testtest@cluster0.9l56haf.mongodb.net/")  # 本機測試可以先寫死，Deploy 再改成環境變數
@@ -21,6 +21,15 @@ app = FastAPI()
 
 
 templates = Jinja2Templates(directory="templates")
+
+
+class EmoGoLog(BaseModel):
+    ts: datetime
+    mood: int
+    lat: float
+    lng: float
+    videoname: str | None = None 
+
 
 
 # 1. 啟動時連線 MongoDB
@@ -89,33 +98,31 @@ async def export_data_json(request: Request):
     return {"vlogs": vlogs, "sentiments": sentiments, "gps": gps}
 
 
+
 @app.get("/export", response_class=HTMLResponse)
 async def export(request: Request):
-    # 直接從「一個」 collection 抓所有資料
     docs = (
-        await app.mongodb["samples_ts_rating_gps"]  
+        await app.mongodb["samples_ts_rating_gps"]
         .find()
-        .sort("ts", 1) 
+        .sort("ts", 1)
         .to_list(None)
     )
 
     rows = []
-    for doc in docs:
-        # 1) Timestamp 去掉小數點
+    # 這裡用 enumerate，自動給 1, 2, 3, ...
+    for idx, doc in enumerate(docs, start=1):
         ts_raw = doc.get("ts")
-        ts_str = str(ts_raw).split(".")[0]  # 變成 "2025-11-26T10:23:35"
+        ts_str = str(ts_raw).split(".")[0]
 
-        # 2) 經緯度四捨五入
         lat = round(float(doc.get("lat", 0)), 4)
         lng = round(float(doc.get("lng", 0)), 4)
 
-        # 3) 影片檔名用 videoname（照你現在的欄位名）
         filename = doc.get("videoname")
         file_url = f"/videos/{filename}" if filename else None
 
         rows.append(
             {
-                "id": doc.get("id"),      # 或者用 enumerate 給新的 index
+                "id": idx,  # 👈 這裡用 enumerate 的 idx，不再讀 doc.get("id")
                 "timestamp": ts_str,
                 "mood": doc.get("mood"),
                 "lat": lat,
@@ -127,12 +134,8 @@ async def export(request: Request):
 
     return templates.TemplateResponse(
         "export.html",
-        {
-            "request": request,
-            "rows": rows,
-        },
+        {"request": request, "rows": rows},
     )
-
 
 
 @app.get("/export-zip")
@@ -200,3 +203,16 @@ async def export_zip():
         media_type="application/x-zip-compressed",
         headers=headers,
     )
+
+@app.post("/api/log")
+async def create_log(log: EmoGoLog = Body(...)):
+    doc = {
+        "ts": log.ts,
+        "mood": log.mood,
+        "lat": log.lat,
+        "lng": log.lng,
+        "videoname": log.videoname,
+    }
+    result = await app.mongodb["samples_ts_rating_gps"].insert_one(doc)
+    return {"inserted_id": str(result.inserted_id)}
+
