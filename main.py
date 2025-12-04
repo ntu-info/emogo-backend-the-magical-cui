@@ -48,11 +48,12 @@ async def shutdown_db_client():
     app.mongodb_client.close()
 
 # 2. 掛載影片資料夾：/videos/... -> 專案裡的 videos/ 檔案
-VIDEO_DIR = Path("videos")
+BASE_DIR = Path(__file__).resolve().parent
+VIDEO_DIR = BASE_DIR / "videos"
 VIDEO_DIR.mkdir(exist_ok=True)
 
 
-app.mount("/videos", StaticFiles(directory="videos"), name="videos")
+app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
 
 # 3. 簡單 health check
 @app.get("/")
@@ -258,3 +259,13 @@ async def upload_sample(
     await app.mongodb["samples_ts_rating_gps"].insert_one(doc)
 
     return {"ok": True, "filename": filename}
+
+@app.get("/debug/videos")
+async def debug_videos():
+    files = []
+    for p in VIDEO_DIR.glob("*.mp4"):
+        files.append({
+            "name": p.name,
+            "size": p.stat().st_size,
+        })
+    return files
