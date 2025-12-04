@@ -4,7 +4,7 @@ import io
 import csv
 import zipfile
 from pathlib import Path
-from fastapi import FastAPI, Request, Body
+from fastapi import FastAPI, Request, Body, UploadFile, File, Form, HTTPException
 from typing import Optional
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -48,6 +48,10 @@ async def shutdown_db_client():
     app.mongodb_client.close()
 
 # 2. 掛載影片資料夾：/videos/... -> 專案裡的 videos/ 檔案
+VIDEO_DIR = Path("videos")
+VIDEO_DIR.mkdir(exist_ok=True)
+
+
 app.mount("/videos", StaticFiles(directory="videos"), name="videos")
 
 # 3. 簡單 health check
@@ -216,3 +220,41 @@ async def create_log(log: EmoGoLog = Body(...)):
     result = await app.mongodb["samples_ts_rating_gps"].insert_one(doc)
     return {"inserted_id": str(result.inserted_id)}
 
+
+@app.post("/api/upload_sample")
+async def upload_sample(
+    ts: str = Form(...),
+    mood: int = Form(...),
+    lat: float = Form(...),
+    lng: float = Form(...),
+    file: UploadFile = File(...),
+):
+    if not file.content_type.startswith("video/"):
+        raise HTTPException(status_code=400, detail="file must be a video")
+
+    # 先把文字 ts 轉成 datetime，盡量吃 ISO 格式
+    try:
+        ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
+    except ValueError:
+        # 萬一格式怪怪的，就退而求其次只當字串存
+        ts_dt = None
+
+    # 做檔名時還是用原本的字串
+    safe_ts = ts.replace(":", "-").replace(" ", "_").replace(".", "-")
+    filename = f"sample_{safe_ts}.mp4"
+    dest_path = VIDEO_DIR / filename
+
+    content = await file.read()
+    with dest_path.open("wb") as f:
+        f.write(content)
+
+    doc = {
+        "ts": ts_dt if ts_dt is not None else ts,
+        "mood": mood,
+        "lat": lat,
+        "lng": lng,
+        "videoname": filename,
+    }
+    await app.mongodb["samples_ts_rating_gps"].insert_one(doc)
+
+    return {"ok": True, "filename": filename}
