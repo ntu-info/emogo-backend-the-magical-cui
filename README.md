@@ -4,6 +4,9 @@
 # Export data
 
 See and download emogo export data here: [emogo-backend](https://emogo-backend-the-magical-cui.onrender.com/export)
+**Note.** The new EmoGo app function for uploading mood ratings and GPS locations to this backend is still under development. As a result, you may see several entries with identical ratings and no associated videos on the export page; this is expected at the current stage.
+
+
 
 # Deploy FastAPI on Render
 
